@@ -8,7 +8,11 @@ import UNAPI as API exposing (Country, Goal, Target, Indicator, Serie, Dimension
 import Scores as SS exposing (ScoreMember, Score)
 import Dict exposing (Dict)
 import Tuple exposing (..)
-
+import File exposing (File)
+import File.Download as FD
+import File.Select as FS
+import Task
+import Json.Decode as JD
 
 main : Program () Model Msg
 main =
@@ -37,9 +41,12 @@ type DataFromAPI
     = FetchedDescription API.Return
     | ErrorDescription String
     | ErrorParsingCSV String
+    | ErrorParsingJson String
     | ErrorInPath 
 
-
+type SavingChoice 
+    = Results
+    | Scores
 
 init : () -> (Model, Cmd Msg)
 init _ = 
@@ -55,12 +62,17 @@ type Msg
     | Fetching API.SearchCmd
     | GotDataFromAPI API.Msg
     | AddDimensions Dimension DimensionCode
-    | AddSerie
+    | AddSerie SS.BuildingMember
     | ChangeDirection ScoreMember
     | ChangeMomentum ScoreMember
     | DeleteSelected ScoreMember
     | ChangeFactor Int ScoreMember
     | ShowMap (Maybe ScoreMember)
+    | Saving SavingChoice
+    | LoadScore
+    | JsonLoaded File
+    | JsonRead String
+
 
 
 update : Msg -> Model -> (Model, Cmd Msg)
@@ -75,19 +87,19 @@ update msg model =
                         Ok return -> 
                             case return of
                                 API.Countries countries -> update (ClickPath API.AllGoals) { model | countries = makeCountryDict countries }
-                                _ -> ({model | data = FetchedDescription return, isLoading= False}, Cmd.none)
+                                _ -> update (ShowMap Nothing) {model | data = FetchedDescription return, isLoading= False}
                         Err err -> ({model | data = ErrorDescription (errorToString err), isLoading = False }, Cmd.none)
-                API.Data result -> 
+                API.Data serie dimensions direction lastOnly factor description result -> 
                     case result of
-                        Ok s -> manageCSV s model
+                        Ok csv -> 
+                            let builder = SS.BuildingMember serie dimensions direction lastOnly factor description
+                            in manageCSV builder model csv
                         Err err -> ({model | data = ErrorDescription (errorToString err), isLoading = False }, Cmd.none)
                 
         AddDimensions dimension code ->
             ({ model | dimensions = manageDimensions dimension.id code.sdmx model.dimensions }, Cmd.none)
-        AddSerie ->
-            case retrieveSerieFromPath model of
-                Nothing -> (model, Cmd.none)
-                Just serie -> update (Fetching (API.DataFrom serie model.dimensions)) model
+        AddSerie builder ->
+            update (Fetching (API.DataFrom builder.serie builder.dimensions builder.direction builder.lastOnly builder.factor builder.description)) model
         ChangeDirection selectedSerie ->
             update (ShowMap model.graphed) { model | score = SS.update (SS.Direction selectedSerie) model.score }
         ChangeMomentum selectedSerie ->
@@ -104,6 +116,39 @@ update msg model =
                         Just serie -> (SS.Score <| [serie])
             in 
                 ({ model | graphed = mScore } , updateChartData (SS.zscores score model.countries))
+        Saving choice ->
+            case choice of
+                Results -> (model, Cmd.none)
+                Scores -> (model, downloadScore model.score)
+        LoadScore -> ( {model | score = SS.empty }, uploadScore)
+        JsonLoaded file ->
+            (model, Task.perform JsonRead (File.toString file))
+        JsonRead file ->
+            case SS.decode file of
+                Err err -> ({ model | data = ErrorParsingJson (JD.errorToString err)}, Cmd.none)
+                Ok list -> (addMember model list, Cmd.none)
+                
+
+
+downloadScore : SS.Score -> Cmd Msg
+downloadScore score =
+    FD.string "score.json" "application/json" (SS.encode score)
+
+
+uploadScore : Cmd Msg
+uploadScore =
+    FS.file ["application/json"] JsonLoaded
+
+
+addMember : Model -> (List SS.BuildingMember) -> Model
+addMember model list =
+    case list of
+        [] -> model
+        x :: xs -> 
+            let 
+                (new_model, _) = update (AddSerie x) model
+            in
+                addMember new_model xs
 
 
 makeCountryDict : (List Country) -> Dict Int String
@@ -118,13 +163,11 @@ makeCountryDict countries =
 
 
 
-manageCSV : String -> Model -> (Model, Cmd Msg)
-manageCSV csv model =
+manageCSV : SS.BuildingMember -> Model -> String -> (Model, Cmd Msg)
+manageCSV builder model csv=
     case API.dataDecoder csv of
         API.CsvParsed list ->
-            case retrieveSerieFromPath model of
-                Nothing -> ({model | data = ErrorInPath, isLoading = False }, Cmd.none)
-                Just serie -> update (ShowMap model.graphed) { model | score = SS.update (SS.AddSerie (serie, model.dimensions) list) model.score, isLoading = False}
+            update (ShowMap model.graphed) { model | score = SS.update (SS.AddSerie builder list) model.score, isLoading = False}
         API.ErrParsingCsv err -> ({model | data = ErrorParsingCSV err, isLoading = False }, Cmd.none)
 
 
@@ -172,7 +215,7 @@ view model =
                 , showLeftPanel model
                 ]
             , div [ class "side-panel" ] 
-                [ div [ class "api-node", class "side-panel-headers"] [ text "Selected Series" ]
+                [ div [class "top-header"] makeRightPanelHeader
                 , showRightPanel model.score
                 ]
             ]
@@ -197,6 +240,7 @@ showLeftPanel model =
                 ErrorDescription s -> showState s
                 ErrorParsingCSV s -> showState s
                 ErrorInPath -> showState "Le chemin a changé, le csv ne peut être attribué"
+                ErrorParsingJson s -> showState s
 
 
 showState : String -> Html Msg
@@ -205,20 +249,22 @@ showState s =
 
 showGoal : Goal -> Html Msg
 showGoal goal = div [class "api-node"] [ span [] [text goal.title]
-                                        , button [ class "api-button", onClick (ClickPath (API.TargetsFrom goal))] [ img [ src "./static/img/loupe.png" ] []]]
+                                        , button [ class "api-button", onClick (ClickPath (API.TargetsFrom goal))] makeSearchButton]
 
 showTarget : Target -> Html Msg
 showTarget target =div [class "api-node"] [ span [] [text target.title]
-                                        , button [ class "api-button", onClick (ClickPath (API.IndicatorsFrom target))] [ img [ src "./static/img/loupe.png" ] []]]
+                                        , button [ class "api-button", onClick (ClickPath (API.IndicatorsFrom target))] makeSearchButton]
 
 showIndicator : Indicator -> Html Msg
 showIndicator indicator = div [class "api-node"] [ span [] [text indicator.description]
-                                        , button [ class "api-button", onClick (ClickPath (API.SeriesFrom indicator))] [ img [ src "./static/img/loupe.png" ] []]]
+                                        , button [ class "api-button", onClick (ClickPath (API.SeriesFrom indicator))] makeSearchButton]
 
 showSerie : Serie -> Html Msg
 showSerie serie = div [class "api-node"] [ span [] [text serie.description]
-                                        , button [ class "api-button", onClick (ClickPath (API.DimensionsFrom serie))] [ img [ src "./static/img/loupe.png" ] []]]
+                                        , button [ class "api-button", onClick (ClickPath (API.DimensionsFrom serie))] makeSearchButton]
 
+makeSearchButton : List (Html Msg)
+makeSearchButton = [ text (String.fromChar (Char.fromCode 0x1f50e))]
 
 showDimensions : List Dimension -> Dict String String -> List (Html Msg)
 showDimensions dimensions dict =
@@ -256,8 +302,8 @@ showOneSelectedSerie : ScoreMember -> Html Msg
 showOneSelectedSerie serie =
     div [ class "api-node" ]
         [ div [ class "serie-preview" ] 
-                [ text serie.serie
-                , div [ class "dimensions-selected"] <| List.map showDimensionOfSelectedSerie serie.dimensions
+                [ text serie.config.description
+                , div [ class "dimensions-selected"] <| List.map showDimensionOfSelectedSerie (Dict.toList serie.config.dimensions)
                 ]
         , showButtonsSelected serie
         ]
@@ -275,7 +321,7 @@ showFactorButton : ScoreMember -> Html Msg
 showFactorButton serie =
     div [ class "factors" ] 
         [ button [ class "dimension", onClick (ChangeFactor -1 serie) ] [ text "-"]
-        , text (String.fromInt serie.factor)
+        , text (String.fromInt serie.config.factor)
         , button [ class "dimension", onClick (ChangeFactor 1 serie) ] [ text "+"]
         ]
 
@@ -306,6 +352,14 @@ makeOneDimensionSelected : String -> String -> Html Msg
 makeOneDimensionSelected dimension code = div [ class "dimension" ] [ text code ]
 
 
+makeRightPanelHeader : List (Html Msg)
+makeRightPanelHeader =
+    [ button [class "api-node", (onClick (LoadScore))] [text "Load"]
+    , div [class "api-node" ] [ text "Score" ]
+    , button [class "api-node", (onClick (Saving Scores))] [text "Save"]
+    ]
+
+
  --PATH
 showTopPath : Model -> Html Msg
 showTopPath model =
@@ -316,11 +370,13 @@ showTopPath model =
                 head :: _ ->
                     case head of
                         API.DimensionsFrom serie ->
-                            button [ class "api-node", onClick (AddSerie)] [ text "Add Serie ->" ]
+                            let builder = SS.BuildingMember serie.code model.dimensions True True 1 serie.description
+                            in
+                            button [ class "api-node", onClick (AddSerie builder)] [ text "Add Serie ->" ]
                         _ -> div [] []
                 [] -> div [] []
     in  
-        div [id "top-path"] 
+        div [id "top-header"] 
             [ div [ id "path" ] <| List.reverse <| backButtons
             , div [] [ addSerieButton ]
             ]
@@ -343,7 +399,7 @@ managePath new_path list =
     -- Remove all paths smalller or equal
     case new_path of
         API.AllCountries -> list
-        API.DataFrom _ _ -> list
+        API.DataFrom _ _ _ _ _ _-> list
         _ -> 
             let onlyGreater searchCmd = pathIsBigger new_path searchCmd
             in 
@@ -371,7 +427,7 @@ pathIsBigger lhs rhs =
             case rhs of 
                 API.DimensionsFrom _ -> False
                 _ -> True
-        API.DataFrom _ _ -> True
+        API.DataFrom _ _ _ _ _ _ -> True
         API.AllCountries -> True
 
 
@@ -394,3 +450,4 @@ errorToString error =
         Http.BadBody errorMessage ->
             errorMessage
  
+-- Import/Export Score

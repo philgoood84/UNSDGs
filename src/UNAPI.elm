@@ -12,11 +12,11 @@ type SearchCmd
     | IndicatorsFrom Target
     | SeriesFrom Indicator
     | DimensionsFrom Serie
-    | DataFrom Serie (Dict String String)
+    | DataFrom String (Dict String String) Bool Bool Int String
 
 type Msg 
     = Description (Result Http.Error Return)
-    | Data (Result Http.Error String)
+    | Data String (Dict String String) Bool Bool Int String (Result Http.Error String)
     
 
 type Return
@@ -57,9 +57,9 @@ queryDB searchCmd =
                         { url = url
                         , expect = Http.expectJson Description dimensionsDecoder
                         }
-            DataFrom serie dimensions -> Http.get
+            DataFrom serie dimensions direction lastOnly factor description -> Http.get
                         { url = url
-                        , expect = Http.expectString Data
+                        , expect = Http.expectString (Data serie dimensions direction lastOnly factor description)
                         }
 
 
@@ -76,9 +76,9 @@ makeUrl searchCmd =
         IndicatorsFrom target -> "https://unstats.un.org/SDGAPI/v1/sdg/Target/" ++ target.code ++ "/Indicator/List?includechildren=true"
         SeriesFrom indicator -> "https://unstats.un.org/SDGAPI/v1/sdg/Indicator/" ++ indicator.code ++ "/Series/List"
         DimensionsFrom serie -> "https://unstats.un.org/SDGAPI/v1/sdg/Series/" ++ serie.code ++ "/Dimensions"
-        DataFrom serie dimensions -> makeDataUrl serie dimensions
+        DataFrom serie dimensions _ _ _ _-> makeDataUrl serie dimensions
 
-makeDataUrl : Serie -> (Dict String String) -> String
+makeDataUrl : String -> (Dict String String) -> String
 makeDataUrl serie dimensions =
     let 
         baseUrl = "https://data.un.org/ws/rest/data/IAEG-SDGs,DF_SDG_GLH,1.6/"
@@ -89,7 +89,7 @@ makeDataUrl serie dimensions =
     in 
         baseUrl ++ structureDimensions ++ periodStart ++ formatOption
 
-dimensionOptions : Serie -> (Dict String String) -> String
+dimensionOptions : String -> (Dict String String) -> String
 dimensionOptions serie dimensions =
     ""
     |> (++) (addDimensionToPath "PRODUCT" dimensions)
@@ -104,7 +104,7 @@ dimensionOptions serie dimensions =
     |> (++) (addDimensionToPath "AGE" dimensions)
     |> (++) (addDimensionToPath "SEX" dimensions)
     |> (++) (addDimensionToPath "REF_AREA" dimensions)
-    |> (++) (String.toUpper serie.code)
+    |> (++) (String.toUpper serie)
     |> (++) (addDimensionToPath "REPORTING_TYPE" dimensions)
     |> (++) (addDimensionToPath "FREQ" dimensions)
     
@@ -284,7 +284,7 @@ dimensionsToReturns dimensions = JD.succeed (Dimensions dimensions)
 type alias DataUN =
     { ref_aera: Int
     , time_period: Int
-    , obs_value: Float
+    , obs_value: Maybe Float
     }
 
 
@@ -293,7 +293,7 @@ dataDecoderHelper =
     CSV.into DataUN
         |> CSV.pipeline (CSV.field "REF_AREA" CSV.int)
         |> CSV.pipeline (CSV.field "TIME_PERIOD" CSV.int)
-        |> CSV.pipeline (CSV.field "OBS_VALUE" CSV.float)
+        |> CSV.pipeline (CSV.field "OBS_VALUE" (CSV.blank CSV.float))
 
 type CsvParsing
     = CsvParsed (List DataUN)

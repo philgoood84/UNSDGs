@@ -23,7 +23,7 @@
     font-family: 'Franklin Gothic Medium', 'Arial Narrow', Arial, sans-serif;
     color:rgb(116, 113, 113);
 }
-#top-path {
+.top-header {
     display: flex;
     flex-direction: row;
     justify-content: space-between;

@@ -23,10 +23,7 @@ push x stat =
         { stat | count = count, m = newM, s = newS }
 
 mean : RunningStat -> Float
-mean stat = 
-    case countOver 0 stat of
-        False -> 0
-        True -> stat.m / (toFloat stat.count)
+mean stat = stat.m 
 
 variance : RunningStat -> Float
 variance stat = 

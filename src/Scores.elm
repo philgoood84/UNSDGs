@@ -1,7 +1,10 @@
-module Scores exposing (Score(..), empty, update, Msg(..), ScoreMember, toArrow, toIcon, toCross, toMap, equals, zscores, ChartItem)
-import UNAPI as API exposing (DataUN, Serie)
+module Scores exposing (Score(..), empty, update, Msg(..), ScoreMember, toArrow, toIcon, toCross, toMap, equals, zscores, ChartItem, encode, decode, BuildingMember)
+import UNAPI as API exposing (DataUN)
 import Dict exposing (Dict)
 import RunningStat exposing (..)
+import Json.Encode as JE
+import Json.Decode as JD
+
 
 -- Scores
 type Score = Score (List ScoreMember)
@@ -16,14 +19,10 @@ type Msg
     | Direction ScoreMember
     | LastOnly ScoreMember
     | Delete ScoreMember
-    | AddSerie (Serie, Dict String String) (List DataUN)
-
-
+    | AddSerie BuildingMember (List DataUN)
 
 empty : Score
 empty = Score []
-
-
 
 update : Msg -> Score -> Score
 update msg (Score list) =
@@ -32,8 +31,8 @@ update msg (Score list) =
         Direction target -> updateMembers target changeDirection list
         LastOnly target -> updateMembers target changeLastOnly list
         Delete target -> Score <| List.filter (\s -> s /= target) list
-        AddSerie (serie, dimensions) values -> 
-            Score <| ((member serie dimensions values) :: list)
+        AddSerie builder values -> 
+            Score <| ((member builder values) :: list)
 
 
 
@@ -54,42 +53,45 @@ equals lhs rhs = lhs.id == rhs.id
 -- SelectedSerie
 
 type alias ScoreMember =
-    { id: String 
-    , serie: String
-    , dimensions: List (String, String)
-    , direction: Bool
-    , lastOnly: Bool
-    , factor: Int
+    { id: String
+    , config: BuildingMember
     , values: (List DataUN)
     }
 
-member : Serie -> Dict String String -> (List DataUN) -> ScoreMember
-member serie dimensions values =
-    let
-        id = makeUniqueId serie dimensions
-    in 
-        ScoreMember id serie.description (Dict.toList dimensions) True True 1 values
 
-makeUniqueId : Serie -> Dict String String -> String
+
+member : BuildingMember -> (List DataUN) -> ScoreMember
+member builder values =
+    let
+        id = makeUniqueId builder.serie builder.dimensions
+    in 
+        ScoreMember id builder values
+
+makeUniqueId : String -> Dict String String -> String
 makeUniqueId serie dimensions =
     let dimension = Dict.foldl (\k v s -> s ++ "." ++ v) "" dimensions
-    in serie.code ++ dimension
+    in serie ++ dimension
+
 
 changeDirection : ScoreMember -> ScoreMember
-changeDirection serie = { serie | direction = not serie.direction }
+changeDirection ({config} as scoreMember) = 
+    { scoreMember 
+    | config = { config | direction = not config.direction }}
 
 changeLastOnly : ScoreMember -> ScoreMember
-changeLastOnly serie = { serie | lastOnly = not serie.lastOnly }
+changeLastOnly ({config} as scoreMember) = 
+    { scoreMember 
+    | config = {config | lastOnly = not config.lastOnly }}
 
 toArrow : ScoreMember -> String 
 toArrow serie =
-    case serie.direction of
+    case serie.config.direction of
         True -> String.fromChar (Char.fromCode 0x1F4C8)
         False -> String.fromChar (Char.fromCode 0x1F4C9)
 
 toIcon : ScoreMember -> String
 toIcon serie =
-    case serie.lastOnly of
+    case serie.config.lastOnly of
         True -> String.fromChar (Char.fromCode 0x1F3C1)
         False -> String.fromChar (Char.fromCode 0x1F680)
 
@@ -101,14 +103,16 @@ toMap : String
 toMap = String.fromChar (Char.fromCode 0x1F5FA)
 
 changeFactor : Int -> ScoreMember -> ScoreMember
-changeFactor change serie = { serie | factor = (max 1 (serie.factor + change)) }
+changeFactor change ({config} as scoreMember) = 
+    { scoreMember 
+    | config = {config | factor = (max 1 (config.factor + change)) }}
 
 
 --Compute Zscores
 zscores : Score -> Dict Int String -> List ChartItem
 zscores (Score list) countries =
     let
-        factor = toFloat <| List.foldl (\x s -> s + x.factor) 0 list
+        factor = toFloat <| List.foldl (\x s -> s + x.config.factor) 0 list 
         results = 
             List.foldl insertIntoDict Dict.empty list
             |> Dict.map (\_ value -> value / factor)
@@ -118,6 +122,7 @@ zscores (Score list) countries =
         wellFormated 
         |> Dict.toList
         |> List.map (\(first, second) -> ChartItem first second)
+
  
 onlyValue : Int -> Float -> (Dict String Float) -> (Dict String Float)
 onlyValue code value dict = dict
@@ -144,19 +149,24 @@ memberZscore : ScoreMember -> Dict Int Float
 memberZscore serie =
     let
         lasts = getLastByCountry serie.values
-        stat = case serie.lastOnly of
+        stat = case serie.config.lastOnly of
             True -> computeStat lasts
             False -> computeStat serie.values
-        sens = case serie.direction of 
+        sens = case serie.config.direction of 
             True -> 1
             False -> -1
-        factor = serie.factor * sens
+        factor = serie.config.factor * sens
     in
         normalized lasts stat factor
 
 computeStat : (List DataUN) -> RunningStat
-computeStat list = List.foldl (\x stat -> (RunningStat.push x.obs_value stat)) RunningStat.empty list
+computeStat list = List.foldl testMaybeFloat RunningStat.empty list
 
+testMaybeFloat : DataUN -> RunningStat -> RunningStat
+testMaybeFloat data stat =
+    case data.obs_value of
+        Nothing -> stat
+        Just x -> RunningStat.push x stat
 
 getLastByCountry : (List DataUN) -> (List DataUN)
 getLastByCountry list =
@@ -168,15 +178,70 @@ addIfMoreRecent data dict =
     case Dict.get data.ref_aera dict of
         Nothing -> Dict.insert data.ref_aera data dict
         Just previous -> 
-            if previous.time_period > data.time_period then
-                dict
-            else
-                Dict.insert data.ref_aera data dict
+            case data.obs_value of
+                Nothing -> dict
+                Just new -> if previous.time_period > data.time_period then
+                                dict
+                            else
+                                Dict.insert data.ref_aera data dict
 
 
 normalized : (List DataUN) -> RunningStat -> Int -> Dict Int Float
 normalized datas stat factor =
     datas
-    |> List.map (\data -> (data.ref_aera, (RunningStat.normalize data.obs_value stat) * (toFloat factor)))
+    |> List.filterMap (normalizeOnlyJust stat factor)
     |> Dict.fromList  
+
+normalizeOnlyJust : RunningStat -> Int -> DataUN -> Maybe (Int, Float)
+normalizeOnlyJust stat factor data =
+    case data.obs_value of
+        Nothing -> Nothing
+        Just x -> Just (data.ref_aera, (RunningStat.normalize x stat) * (toFloat factor))
+
+
+
+-- JSON Encoding
+encode : Score -> String
+encode (Score list) =
+    list
+    |> List.map (\x -> x.config)
+    |> JE.list encodeMember
+    |> JE.encode 2 
+
+
+encodeMember : BuildingMember -> JE.Value
+encodeMember serie = 
+    JE.object 
+        [ ( "serie", JE.string serie.serie)
+        , ( "dimensions", (JE.dict identity JE.string serie.dimensions))
+        , ( "direction", JE.bool serie.direction)
+        , ( "lastOnly", JE.bool serie.lastOnly)
+        , ( "factor", JE.int serie.factor)
+        , ( "description", JE.string serie.description)
+        ]
+
+-- JSON Decoding
+decode : String -> Result JD.Error (List BuildingMember)
+decode string =
+    JD.decodeString (JD.list decodeMember) string
+
+type alias BuildingMember =
+    { serie: String
+    , dimensions: Dict String String
+    , direction: Bool
+    , lastOnly: Bool
+    , factor: Int
+    , description: String
+    }
+
+decodeMember : JD.Decoder BuildingMember
+decodeMember =
+    JD.map6 BuildingMember
+        (JD.field "serie" JD.string)
+        (JD.field "dimensions" (JD.dict JD.string))
+        (JD.field "direction" JD.bool)
+        (JD.field "lastOnly" JD.bool)
+        (JD.field "factor" JD.int)
+        (JD.field "description" JD.string)
+
 
