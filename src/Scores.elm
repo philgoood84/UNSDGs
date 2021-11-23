@@ -1,10 +1,10 @@
-module Scores exposing (Score(..), empty, update, Msg(..), ScoreMember, toArrow, toIcon, toCross, toMap, equals, zscores, ChartItem, encode, decode, BuildingMember)
+module Scores exposing (Score(..), empty, update, Msg(..), ScoreMember, toArrow, toIcon, toCross, toMap, equals, zscores, ChartItem, encode, decode, BuildingMember, toCsv)
 import UNAPI as API exposing (DataUN)
 import Dict exposing (Dict)
 import RunningStat exposing (..)
 import Json.Encode as JE
 import Json.Decode as JD
-
+import Csv.Encode as CSV
 
 -- Scores
 type Score = Score (List ScoreMember)
@@ -109,8 +109,8 @@ changeFactor change ({config} as scoreMember) =
 
 
 --Compute Zscores
-zscores : Score -> Dict Int String -> List ChartItem
-zscores (Score list) countries =
+zscores : Dict Int String -> Score -> List ChartItem
+zscores countries (Score list)  =
     let
         factor = toFloat <| List.foldl (\x s -> s + x.config.factor) 0 list 
         results = 
@@ -245,3 +245,18 @@ decodeMember =
         (JD.field "description" JD.string)
 
 
+-- CSV Encoding
+toCsv : Dict Int String -> Score -> String
+toCsv countries score =
+    zscores countries score
+    |> List.map (\x -> (x.id, x.score))
+    |> CSV.encode
+        { encoder =
+            CSV.withFieldNames
+                (\(id, value) ->
+                    [ ("Pays", id)
+                    , ("Score", String.fromFloat value)
+                    ]
+                )
+        , fieldSeparator = ','
+        }

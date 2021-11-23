@@ -2,7 +2,7 @@ port module Main exposing (..)
 import Browser
 import Http
 import Html exposing (..)
-import Html.Attributes exposing (id, class, src, hidden, style)
+import Html.Attributes exposing (id, class, src, hidden, style, value, placeholder, disabled, selected)
 import Html.Events exposing (..)
 import UNAPI as API exposing (Country, Goal, Target, Indicator, Serie, Dimension, DimensionCode, Return(..))
 import Scores as SS exposing (ScoreMember, Score)
@@ -45,8 +45,8 @@ type DataFromAPI
     | ErrorInPath 
 
 type SavingChoice 
-    = Results
-    | Scores
+    = SaveResults
+    | SaveScores
 
 init : () -> (Model, Cmd Msg)
 init _ = 
@@ -68,7 +68,7 @@ type Msg
     | DeleteSelected ScoreMember
     | ChangeFactor Int ScoreMember
     | ShowMap (Maybe ScoreMember)
-    | Saving SavingChoice
+    | Saving String
     | LoadScore
     | JsonLoaded File
     | JsonRead String
@@ -99,7 +99,7 @@ update msg model =
         AddDimensions dimension code ->
             ({ model | dimensions = manageDimensions dimension.id code.sdmx model.dimensions }, Cmd.none)
         AddSerie builder ->
-            update (Fetching (API.DataFrom builder.serie builder.dimensions builder.direction builder.lastOnly builder.factor builder.description)) model
+            update (Fetching (fromBMtoSC builder)) model
         ChangeDirection selectedSerie ->
             update (ShowMap model.graphed) { model | score = SS.update (SS.Direction selectedSerie) model.score }
         ChangeMomentum selectedSerie ->
@@ -115,25 +115,39 @@ update msg model =
                         Nothing -> model.score
                         Just serie -> (SS.Score <| [serie])
             in 
-                ({ model | graphed = mScore } , updateChartData (SS.zscores score model.countries))
+                ({ model | graphed = mScore } , updateChartData (SS.zscores model.countries score))
         Saving choice ->
             case choice of
-                Results -> (model, Cmd.none)
-                Scores -> (model, downloadScore model.score)
+                "Results" -> (model, downloadResults model.countries model.score)
+                "Scores" -> (model, downloadScore model.score)
+                _ -> (model, Cmd.none)
         LoadScore -> ( {model | score = SS.empty }, uploadScore)
         JsonLoaded file ->
             (model, Task.perform JsonRead (File.toString file))
         JsonRead file ->
             case SS.decode file of
                 Err err -> ({ model | data = ErrorParsingJson (JD.errorToString err)}, Cmd.none)
-                Ok list -> (addMember model list, Cmd.none)
-                
+                Ok list -> 
+                    let 
+                        list_cmd = 
+                            list
+                            |> List.map fromBMtoSC 
+                            |> List.map (\sc -> Cmd.map GotDataFromAPI (API.queryDB sc))
+                    in (model, Cmd.batch list_cmd)
+
+
+fromBMtoSC : SS.BuildingMember -> API.SearchCmd
+fromBMtoSC builder = 
+    API.DataFrom builder.serie builder.dimensions builder.direction builder.lastOnly builder.factor builder.description
 
 
 downloadScore : SS.Score -> Cmd Msg
 downloadScore score =
     FD.string "score.json" "application/json" (SS.encode score)
 
+downloadResults :  Dict Int String -> SS.Score -> Cmd Msg
+downloadResults countries score =
+    FD.string "results.csv" "text/csv" (SS.toCsv countries score)
 
 uploadScore : Cmd Msg
 uploadScore =
@@ -355,8 +369,12 @@ makeOneDimensionSelected dimension code = div [ class "dimension" ] [ text code 
 makeRightPanelHeader : List (Html Msg)
 makeRightPanelHeader =
     [ button [class "api-node", (onClick (LoadScore))] [text "Load"]
-    , div [class "api-node" ] [ text "Score" ]
-    , button [class "api-node", (onClick (Saving Scores))] [text "Save"]
+    , div [class "titleScore" ] [ text "Score" ]
+    , select [class "api-node", placeholder "Save", onInput Saving] 
+        [ option [value "", disabled True, selected True, hidden True] [ text (String.fromChar (Char.fromCode 0x1F4BE))] 
+        , option [ value "Scores" ] [ text "Scores"]
+        , option [ value "Results" ] [ text "Results"]
+        ]
     ]
 
 
@@ -376,9 +394,9 @@ showTopPath model =
                         _ -> div [] []
                 [] -> div [] []
     in  
-        div [id "top-header"] 
+        div [class "top-header"] 
             [ div [ id "path" ] <| List.reverse <| backButtons
-            , div [] [ addSerieButton ]
+            , addSerieButton
             ]
 
 pathButton : API.SearchCmd -> Html Msg
@@ -450,4 +468,4 @@ errorToString error =
         Http.BadBody errorMessage ->
             errorMessage
  
--- Import/Export Score
+
