@@ -223,13 +223,13 @@ view model =
     { title = "SDG Scores"
     , body = 
         [ div [ id "chartdiv" ] []
-        , div [ id "choices" ] 
-            [ div [ class "side-panel"] 
+        , div [ class "shared-params", id "choices" ] 
+            [ div [ class "shared-params", class "side-panel" ] 
                 [ showTopPath model
                 , showLeftPanel model
                 ]
-            , div [ class "side-panel" ] 
-                [ div [class "top-header"] makeRightPanelHeader
+            , div [ class "shared-params", class "side-panel" ] 
+                [ div [ class "shared-params", class "top-header"] makeRightPanelHeader
                 , showRightPanel model.score
                 ]
             ]
@@ -259,23 +259,23 @@ showLeftPanel model =
 
 showState : String -> Html Msg
 showState s =
-    div [class "api-node"  ] [ text s ]   
+    div [ class "shared-params", class "elements", class "api-node" ] [ text s ]   
 
 showGoal : Goal -> Html Msg
-showGoal goal = div [class "api-node"] [ span [] [text goal.title]
-                                        , button [ class "api-button", onClick (ClickPath (API.TargetsFrom goal))] makeSearchButton]
+showGoal goal = div [ class "shared-params", class "elements", class "api-node" ] [ span [] [text goal.title]
+                                        , button [ class "shared-params", class "elements", class "api-button", onClick (ClickPath (API.TargetsFrom goal))] makeSearchButton]
 
 showTarget : Target -> Html Msg
-showTarget target =div [class "api-node"] [ span [] [text target.title]
-                                        , button [ class "api-button", onClick (ClickPath (API.IndicatorsFrom target))] makeSearchButton]
+showTarget target =div [ class "shared-params", class "elements", class "api-node"] [ span [] [text target.title]
+                                        , button [ class "shared-params", class "elements", class "api-button", onClick (ClickPath (API.IndicatorsFrom target))] makeSearchButton]
 
 showIndicator : Indicator -> Html Msg
-showIndicator indicator = div [class "api-node"] [ span [] [text indicator.description]
-                                        , button [ class "api-button", onClick (ClickPath (API.SeriesFrom indicator))] makeSearchButton]
+showIndicator indicator = div [class "shared-params", class "elements", class "api-node"] [ span [] [text indicator.description]
+                                        , button [ class "shared-params", class "elements", class "api-button", onClick (ClickPath (API.SeriesFrom indicator))] makeSearchButton]
 
 showSerie : Serie -> Html Msg
-showSerie serie = div [class "api-node"] [ span [] [text serie.description]
-                                        , button [ class "api-button", onClick (ClickPath (API.DimensionsFrom serie))] makeSearchButton]
+showSerie serie = div [class "shared-params", class "elements", class "api-node"] [ span [] [text serie.description]
+                                        , button [ class "shared-params", class "elements", class "api-button", onClick (ClickPath (API.DimensionsFrom serie))] makeSearchButton]
 
 makeSearchButton : List (Html Msg)
 makeSearchButton = [ text (String.fromChar (Char.fromCode 0x1f50e))]
@@ -288,8 +288,8 @@ showDimensions dimensions dict =
         List.map (\t -> showOneDimension t) alreadySelected
 
 showOneDimension : (Dimension, Maybe String) -> Html Msg
-showOneDimension (dim, ms) = div [] [ span [class "api-node"] [text dim.id]
-                                    , div [class "dimension-choices"] <| List.map (\code -> (showOneDimensionCode dim ms code)) dim.codes ]
+showOneDimension (dim, ms) = div [] [ span [class "shared-params", class "elements", class "api-node"] [text dim.id]
+                                    , div [class "shared-params", class "elements", class "dimension-choices"] <| List.map (\code -> (showOneDimensionCode dim ms code)) dim.codes ]
     
 showOneDimensionCode : Dimension -> Maybe String -> DimensionCode -> Html Msg
 showOneDimensionCode dim ms code =
@@ -303,7 +303,7 @@ showOneDimensionCode dim ms code =
                     else
                         "dimension"
     in 
-        button  [ class buttonClass
+        button  [ class "shared-params", class "elements", class buttonClass
                 , onClick (AddDimensions dim code)] [text code.description ]
 
 -- Right Panel
@@ -314,17 +314,17 @@ showRightPanel (SS.Score list) =
 
 showOneSelectedSerie : ScoreMember -> Html Msg
 showOneSelectedSerie serie =
-    div [ class "api-node" ]
-        [ div [ class "serie-preview" ] 
+    div [ class "shared-params", class "elements", class "api-node" ]
+        [ div [ class "shared-params", class "elements", class "serie-preview" ] 
                 [ text serie.config.description
-                , div [ class "dimensions-selected"] <| List.map showDimensionOfSelectedSerie (Dict.toList serie.config.dimensions)
+                , div [ class "shared-params", class "elements", class "dimensions-selected"] <| List.map showDimensionOfSelectedSerie (Dict.toList serie.config.dimensions)
                 ]
         , showButtonsSelected serie
         ]
 
 showButtonsSelected : ScoreMember -> Html Msg
 showButtonsSelected serie =
-    div [ class "buttons-selected" ] 
+    div [ class "shared-params", class "elements", class "factors" ] 
         [ showFactorButton serie
         , showUpAndDownButton serie
         , showLevelSlopeButton serie
@@ -333,44 +333,44 @@ showButtonsSelected serie =
 
 showFactorButton : ScoreMember -> Html Msg
 showFactorButton serie =
-    div [ class "factors" ] 
-        [ button [ class "dimension", onClick (ChangeFactor -1 serie) ] [ text "-"]
+    div [ class "shared-params", class "elements", class "factors" ] 
+        [ button [ class "shared-params", class "elements", class "dimension", onClick (ChangeFactor -1 serie) ] [ text "-"]
         , text (String.fromInt serie.config.factor)
-        , button [ class "dimension", onClick (ChangeFactor 1 serie) ] [ text "+"]
+        , button [ class "shared-params", class "elements", class "dimension", onClick (ChangeFactor 1 serie) ] [ text "+"]
         ]
 
 
 showUpAndDownButton : ScoreMember -> Html Msg
 showUpAndDownButton serie =
-    button [ class "dimension", onClick (ChangeDirection serie) ] [ text (SS.toArrow serie) ]
+    button [ class "shared-params", class "elements", class "dimension", onClick (ChangeDirection serie) ] [ text (SS.toArrow serie) ]
 
 showLevelSlopeButton : ScoreMember -> Html Msg
 showLevelSlopeButton serie =
-    button [ class "dimension", onClick (ChangeMomentum serie) ] [ text (SS.toIcon serie) ]
+    button [ class "shared-params", class "elements", class "dimension", onClick (ChangeMomentum serie) ] [ text (SS.toIcon serie) ]
 
 showMapButton : ScoreMember -> Html Msg
 showMapButton serie =
-    button [ class "dimension", onMouseOver (ShowMap (Just serie)), onMouseLeave (ShowMap Nothing) ] [ text SS.toMap ]
+    button [ class "shared-params", class "elements", class "dimension", onMouseOver (ShowMap (Just serie)), onMouseLeave (ShowMap Nothing) ] [ text SS.toMap ]
 
 showCrossButton : ScoreMember -> Html Msg
 showCrossButton serie =
-    button [ class "dimension", onClick (DeleteSelected serie) ] [ text SS.toCross ]
+    button [ class "shared-params", class "elements", class "dimension", onClick (DeleteSelected serie) ] [ text SS.toCross ]
 
 
 
 
 showDimensionOfSelectedSerie : (String, String) -> Html Msg
-showDimensionOfSelectedSerie (first, second) = div [ class "dimension" ] [ text (first ++ ": " ++ second) ]
+showDimensionOfSelectedSerie (first, second) = div [ class "shared-params", class "elements", class "dimension" ] [ text (first ++ ": " ++ second) ]
 
 makeOneDimensionSelected : String -> String -> Html Msg
-makeOneDimensionSelected dimension code = div [ class "dimension" ] [ text code ]
+makeOneDimensionSelected dimension code = div [ class "shared-params", class "elements", class "dimension" ] [ text code ]
 
 
 makeRightPanelHeader : List (Html Msg)
 makeRightPanelHeader =
-    [ button [class "api-node", (onClick (LoadScore))] [text "Load"]
-    , div [class "titleScore" ] [ text "Score" ]
-    , select [class "api-node", placeholder "Save", onInput Saving] 
+    [ button [ class "shared-params", class "elements", class "api-node", (onClick (LoadScore))] [text (String.fromChar (Char.fromCode 0x1F4C2))]
+    , div [ class "shared-params", class "elements", class "titleScore" ] [ text "Score" ]
+    , select [ class "shared-params", class "elements", class "api-node", placeholder "Save", onInput Saving] 
         [ option [value "", disabled True, selected True, hidden True] [ text (String.fromChar (Char.fromCode 0x1F4BE))] 
         , option [ value "Scores" ] [ text "Scores"]
         , option [ value "Results" ] [ text "Results"]
@@ -390,12 +390,12 @@ showTopPath model =
                         API.DimensionsFrom serie ->
                             let builder = SS.BuildingMember serie.code model.dimensions True True 1 serie.description
                             in
-                            button [ class "api-node", onClick (AddSerie builder)] [ text "Add Serie ->" ]
+                            button [ class "shared-params", class "elements", class "api-node", onClick (AddSerie builder)] [ text "Add Serie ->" ]
                         _ -> div [] []
                 [] -> div [] []
     in  
-        div [class "top-header"] 
-            [ div [ id "path" ] <| List.reverse <| backButtons
+        div [ class "shared-params", class "top-header"] 
+            [ div [ class "shared-params", id "path" ] <| List.reverse <| backButtons
             , addSerieButton
             ]
 
@@ -409,7 +409,7 @@ pathButton searchCmd =
                         API.DimensionsFrom s -> "Serie " ++ s.code
                         _ -> "Erreur Data"
     in 
-        button [ class "api-node", onClick (ClickPath searchCmd) ] [ text pathText ]
+        button [ class "shared-params", class "elements", class "api-node", onClick (ClickPath searchCmd) ] [ text pathText ]
 
 
 managePath : API.SearchCmd -> List API.SearchCmd -> List API.SearchCmd
